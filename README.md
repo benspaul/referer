@@ -1,2 +1,2 @@
 # referer
-Data science exercise - analyzing a/b results with moderator variables
+A data science exercise to analyze A/B test results with moderator variables
