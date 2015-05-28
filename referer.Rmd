@@ -1,0 +1,202 @@
+---
+title: "A/B Test with Referer and Country"
+author: "Ben Paul"
+date: "May 22, 2015"
+output: html_document
+---
+
+## Background
+
+* We tested two versions of a landing page in order to determine which had a greater return on investment (ROI).
+
+* We also collected data about traffic source ("referer") and country of origin, to determine if the effect of landing page was different depending on the referer and country.
+
+## Hypotheses
+
+* No hypotheses were specified.
+
+## Method
+
+* Since no hypotheses were specified in advance, the data set was randomly split in half so that one half could be used to generate hypotheses (the "exploratory" data set) and the other half could be used to test those hypotheses (the "validation" data set).
+
+* In particular, an ANOVA was conducted on the exploratory data set to assess the effects of landing page, country, and referer on ROI. Effects found in the exploratory data set were re-tested in the validation set.
+
+## Analysis
+
+### Set up environment
+
+```{r Set up environment, message = FALSE}
+
+library("plyr")
+library("dplyr")
+library("ggplot2")
+library("lmtest")
+source("interaction.t.tests.R")
+
+knitr::opts_chunk$set(comment = NA) # remove hashes in output
+knitr::opts_chunk$set(fig.width = 12) # increase plot width
+theme_set(theme_gray(base_size = 12)) # decrease font size
+
+```
+
+
+### Read data
+
+```{r Read data}
+
+dat <- read.csv("data/referer_data.csv")
+
+```
+
+### Split data
+
+```{r Split data}
+
+set.seed(25)
+samp <- sample(nrow(dat), nrow(dat) / 2)
+explore <- dat[samp, ]
+validate <- dat[-samp, ]
+
+```
+
+### Clean data
+
+#### Handle data types
+
+Check that data types are appropriate.
+
+```{r Clean data - Handle data types - Pt 1}
+
+summary(explore, maxsum = 10); str(explore);
+
+```
+
+Data types appear to be appropriate. Referer, country, and landing_page are defined as factors, and roi is numeric, as expected.
+
+ROI ranges from 5.63 to 182.76. Assuming the unit is cents, these values would appear to be within reason for a website visit. (It is difficult to find comparable benchmarks, but related data on average revenue per unique visitor can be found at http://www.businessinsider.com/chart-of-the-day-revenue-per-unique-visitor-2011-1. Since our data concern profit rather than revenue, it would make sense that our numbers are much lower than those from the Business Insider article.)
+
+### Analyze data
+
+#### Diagnostics
+
+A three-way ANOVA was planned to test the effect of landing page, country, and referer on ROI. Since we are analyzing a landing page test, only terms that included the landing page variable were entered into the analysis: landing page, country x landing page, referer x landing page, and country x referer x landing page.
+
+Before inspecting the results, diagnostic plots were inspected to ensure ANOVA assumptions were met.
+
+```{r Analyze data - ANOVA Diagnostics}
+
+explore_fit <- aov(roi ~ landing_page + landing_page:referer + landing_page:country + landing_page:country:referer, data = explore)
+layout(1)
+plot(explore_fit, 1)
+
+```
+
+In this plot, the vast majority of the 500,000 residuals appear to have no relationship with fitted values. However, it appears that heteroscedasticity may be present: there are about 10-20 data points with low fitted values that seem to be associated with greater residual variation compared to those with higher fitted values. But since it is difficult to tell from visual inspection if this represents significant heteroscedasticity, a formal test for heteroscedasticity was run.
+
+```{r Analyze data - Test for heteroscedasticity}
+
+# Breusch-Pagan test for heteroscedasticity 
+bptest(explore_fit)
+
+```
+
+The test failed to detect heteroscedasticity, *p* = 1. Thus, heteroscedasticity is not a concern. The next diagnostic was to check if nonnormality is present.
+
+```{r Analyze data - Q-Q plot}
+
+layout(1)
+plot(explore_fit, 2)
+
+```
+
+The data appear to be very nearly normal, although there are deviations in the tails that appear to affect about 20 of the 500,000 data points. Again, this is not thought to be a large enough concern to merit further action. ANOVA assumptions appear to be reasonably met and we can proceed with analyzing the results.
+
+#### ANOVA
+
+```{r Analyze data - ANOVA}
+
+explore_fit %>% drop1(.~., test = "F") # use Type III SS so that variable order doesn't matter - see http://www.statmethods.net/stats/anova.html
+
+```
+
+The main effect of landing page was significant, qualified by statistically significant interactions with referer and with country (all *p*s < 0.001). Although the three-way interaction between landing page, referer, and country was also statistically significant, it is associated with a sum of squares = 0, indicating that it did not explain any variance. Therefore, it will not be interpreted.
+
+To visualize the effects, all data points were plotted, with landing page on the x-axis and ROI on the y-axis, and graphs faceted by referer and colored by country. The order of referers was changed to demonstrate the results more clearly.
+
+```{r Analyze data - Plot results}
+
+# reorder referer levels
+ref_levels <- c("blogher", "MSmag", "pioneeringwoman",
+                "caranddriver", "footballoutsider",
+                "scify", "FB", "Google", "YouTube", "Other")
+explore <- within(explore, referer <- factor(referer, levels = ref_levels))
+
+ggplot(explore, aes(x = landing_page, y = roi)) +
+  geom_jitter(alpha = 0.5, aes(color = country), position = position_jitter(width = 0.2, height = 0.1)) +
+  facet_wrap(~referer, nrow = 1)
+
+```
+
+The interaction between referer and landing page can be seen in that some referers have greater ROI with landing page "a", others have greater ROI with landing page "b", and others have no difference. Follow-up *t*-tests were conducted to verify this effect.
+
+The interaction between country and landing page is not visible from the graph and may be of a much lower magnitidue. Follow-up *t*-tests were conducted to verify this effect as well.
+
+```{r Analyze data - Follow-up t-tests}
+
+# set p-value cutoff using Bonferroni correction considering we are running several tests:
+# (1) for each referer, run t-test comparing ROI from "a" vs. "b"
+# (2) for each country, run t-test comparing ROI from "a" vs. "b"
+
+p_cutoff <- 0.05 / (length(levels(explore$referer)) * 2)
+
+# tests with referer
+explore %>% interaction.t.tests(iv = "referer", group_var = "landing_page", dv = "roi", p_cutoff = p_cutoff)
+
+# tests with country
+explore %>% interaction.t.tests(iv = "country", group_var = "landing_page", dv = "roi", p_cutoff = p_cutoff)
+
+```
+
+Results indicate that:
+
+* Landing page "a" had greater ROI than landing page "b" for referers "blogher", "MSmag", and "pioneeringwoman" (*p* < 0.001, ROI differences range from 31 - 32).
+
+* Landing page "b" had greater ROI than landing page "a" for referers "caranddriver" and "footballoutsider"" (*p* < 0.001, ROI differences range from 7 - 8).
+
+* Landing pages "a" and "b" did not have different ROIs for referers "scify", "FB", "Google", "YouTube", and "Other" (all *p*s > 0.1).
+
+* Landing page "a" ROI is greater than "b" by two units (presumably cents) regardless of country; despite the statistically significant interaction effect between the two variables, the *t*-test results above show that the effect of landing page differs by less than one cent from country to country (ROI differences range from 1.69 - 2.36 cents). Since the magnitude of this effect is extremely low compared to other effects seen in the data, it is considered to be of minimal importance and will not be interpreted further.
+
+The referer by landing page interaction was re-tested in the validation data set.
+
+```{r Analyze data - Validate results}
+
+# reorder referer levels
+ref_levels <- c("blogher", "MSmag", "pioneeringwoman",
+                "caranddriver", "footballoutsider",
+                "scify", "FB", "Google", "YouTube", "Other")
+validate <- within(validate, referer <- factor(referer, levels = ref_levels))
+
+validate %>% interaction.t.tests(iv = "referer", group_var = "landing_page", dv = "roi")
+
+```
+
+The same results are seen (all *p*s < 0.001), so the hypotheses have been supported. Just as in the exploratory set:
+
+* Landing page "a" had greater ROI than landing page "b" for referers "blogher", "MSmag", and "pioneeringwoman" (*p* < 0.001, ROI differences range from 31 - 32, same as exploratory results).
+
+* Landing page "b" had greater ROI than landing page "a" for referers "caranddriver" and "footballoutsider"" (*p* < 0.001, ROI differences range from 7 - 8, same as exploratory results).
+
+* Landing pages "a" and "b" did not have different ROIs for referers "scify", "FB", "Google", "YouTube", and "Other" (all *p*s > 0.1, same as exploratory results).
+
+## Discussion
+
+The referers whose traffic benefits from landing page "a" all appear to be targeted at females (blog**her**, **MS**mag, pioneering**woman**). Assuming that these referers are associated with blogher.com, msmagazine.com, and thepioneerwoman.com, data from Alexa confirm that females are "greatly over-represented" in their traffic (http://www.alexa.com/siteinfo/blogher.com, http://www.alexa.com/siteinfo/msmagazine.com, http://www.alexa.com/siteinfo/thepioneerwoman.com).
+
+In contrast, referers whose traffic benefits from page "b" appear to be targeted at males (caranddriver, footballoutsider). Assuming that these referers are associated with caranddriver.com and footballoutsiders.com, data from Alexa confirm that males are "over-represented" in the former (http://www.alexa.com/siteinfo/caranddriver.com) and "greatly over-represented" in the latter (http://www.alexa.com/siteinfo/footballoutsiders.com).
+
+Finally, referers whose traffic benefits equally from page "a" and "b" appear to be targeted at both males and females roughly equally. Although Alexa data are not available for "scify", Quantcast data for syfy.com (which used to be scify.com) shows the genders are roughly even, with only slightly more males (https://www.quantcast.com/syfy.com). Alexa data for youtube.com, facebook.com, and google.com also show a similar pattern: there are some gender differences but not nearly to the magnitude of that seen in sites like caranddriver.com and msmagazine.com.
+
+In light of this finding, it may be worthwhile to assign all traffic from overwhelmingly female referers to see landing page "a" and all traffic from overwhelmingly male referers to see landing page "b". We would monitor overall ROI to ensure that it increases after this change.
+
+In addition, it may be worthwhile to conduct user interviews to try to discern why the pages appeal to different genders. For example, it could be found that the title at the top of landing page "a" resonates with females, while an image on the page does not. Different versions of the image more aligned with the message could then be attempted in an effort to further increase ROI.
