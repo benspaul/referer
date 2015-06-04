@@ -139,7 +139,7 @@ ggplot(explore, aes(x = landing_page, y = roi)) +
 
 The interaction between referer and landing page can be seen in that some referers have greater ROI with landing page "a", others have greater ROI with landing page "b", and others have no difference. Follow-up *t*-tests were conducted to verify this effect.
 
-The interaction between country and landing page is not visible from the graph and may be of a much lower magnitidue. Follow-up *t*-tests were conducted to verify this effect as well.
+The interaction between country and landing page is not visible from the graph and may be of a much lower magnitude. Follow-up *t*-tests were conducted to verify this effect as well.
 
 ```{r Analyze data - Follow-up t-tests}
 
